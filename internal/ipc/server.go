@@ -102,7 +102,7 @@ func (s *Server) Listen() error {
 		ln.Close()
 		return err
 	}
-	if s.SocketGID > math.MaxUint32 {
+	if s.SocketGID > math.MaxInt32 {
 		ln.Close()
 		return fmt.Errorf("socket group id %d out of range", s.SocketGID)
 	}
