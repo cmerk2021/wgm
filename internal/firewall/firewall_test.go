@@ -2,7 +2,6 @@ package firewall
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/netip"
 	"os"
@@ -13,69 +12,7 @@ import (
 	"time"
 )
 
-// fakeNFT models the kernel's view of the WGM table by interpreting the
-// rendered ruleset text.
-type fakeNFT struct {
-	table      string // currently applied ruleset text ("" = absent)
-	applyErr   error
-	deleteErr  error
-	applyCount int
-	unavail    error
-}
-
-func (f *fakeNFT) Available() error { return f.unavail }
-
-func (f *fakeNFT) Apply(_ context.Context, text string) error {
-	if f.applyErr != nil {
-		return f.applyErr
-	}
-	f.applyCount++
-	f.table = text
-	return nil
-}
-
-func (f *fakeNFT) DeleteTable(context.Context) error {
-	if f.deleteErr != nil {
-		return f.deleteErr
-	}
-	f.table = ""
-	return nil
-}
-
-var commentRE = regexp.MustCompile(`comment "([^"]+)"`)
-
-func (f *fakeNFT) ListTable(context.Context) ([]byte, bool, error) {
-	if f.table == "" {
-		return nil, false, nil
-	}
-	doc := nftDoc{}
-	add := func(kind string, v any) {
-		raw, _ := json.Marshal(v)
-		doc.Nftables = append(doc.Nftables, map[string]json.RawMessage{kind: raw})
-	}
-	add("table", nftTable{Family: "inet", Name: TableName})
-	chain := ""
-	for _, line := range strings.Split(f.table, "\n") {
-		l := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(l, "chain "):
-			chain = strings.Fields(l)[1]
-		case strings.HasPrefix(l, "type filter hook"):
-			hook := strings.Fields(l)[3]
-			policy := strings.TrimSuffix(strings.Fields(l)[len(strings.Fields(l))-1], ";")
-			add("chain", nftChain{Family: "inet", Table: TableName, Name: chain, Type: "filter", Hook: hook, Policy: policy})
-		case l == "}" || l == "" || strings.HasPrefix(l, "table") || strings.HasPrefix(l, "delete"):
-		default:
-			r := nftRule{Family: "inet", Table: TableName, Chain: chain}
-			if m := commentRE.FindStringSubmatch(l); m != nil {
-				r.Comment = m[1]
-			}
-			add("rule", r)
-		}
-	}
-	data, _ := json.Marshal(doc)
-	return data, true, nil
-}
+type fakeNFT = FakeNFT
 
 func spec() Spec {
 	return Spec{Interface: "wg0", Endpoints: []netip.AddrPort{netip.MustParseAddrPort("203.0.113.10:51820")}, FwMark: 0xca6c, AllowDHCP: true}
@@ -159,13 +96,13 @@ func TestVerify(t *testing.T) {
 		t.Fatal("verify must detect a different policy")
 	}
 	// Policy changed to accept.
-	f.table = strings.Replace(rs.Text, "hook output priority filter; policy drop;", "hook output priority filter; policy accept;", 1)
+	f.Table = strings.Replace(rs.Text, "hook output priority filter; policy drop;", "hook output priority filter; policy accept;", 1)
 	data, _, _ = f.ListTable(context.Background())
 	if ok, why := Verify(data, rs); ok || !strings.Contains(why, "policy=accept") {
 		t.Fatalf("accept policy not detected: %v %s", ok, why)
 	}
 	// Extra rule inserted (e.g. someone added an accept).
-	f.table = strings.Replace(rs.Text, `oifname "lo" accept`, "oifname \"lo\" accept\n\t\taccept", 1)
+	f.Table = strings.Replace(rs.Text, `oifname "lo" accept`, "oifname \"lo\" accept\n\t\taccept", 1)
 	data, _, _ = f.ListTable(context.Background())
 	if ok, _ := Verify(data, rs); ok {
 		t.Fatal("extra rule not detected")
@@ -203,50 +140,50 @@ func TestManagerLifecycle(t *testing.T) {
 	if err := m2.Reconcile(ctx, &sp); err != nil {
 		t.Fatal(err)
 	}
-	if m2.Status().State != StateEnforced || f.table == "" {
+	if m2.Status().State != StateEnforced || f.Table == "" {
 		t.Fatalf("after restart: %+v", m2.Status())
 	}
 
 	// External removal (e.g. `nft flush ruleset`): reconcile reinstalls.
-	f.table = ""
-	before := f.applyCount
+	f.Table = ""
+	before := f.ApplyCount
 	transitions = nil
 	if err := m.Reconcile(ctx, &sp); err != nil {
 		t.Fatal(err)
 	}
-	if f.applyCount != before+1 || m.Status().State != StateEnforced || transitions[0] != StateError {
+	if f.ApplyCount != before+1 || m.Status().State != StateEnforced || transitions[0] != StateError {
 		t.Fatalf("reinstall: %+v %v", m.Status(), transitions)
 	}
 
 	// Failed update keeps old rules and reports error.
-	old := f.table
-	f.applyErr = errors.New("netlink: Error: Could not process rule")
+	old := f.Table
+	f.ApplyErr = errors.New("netlink: Error: Could not process rule")
 	sp2 := spec()
 	sp2.AllowLAN = true
 	if err := m.Reconcile(ctx, &sp2); err == nil {
 		t.Fatal("expected error")
 	}
-	if f.table != old || m.Status().State != StateError {
+	if f.Table != old || m.Status().State != StateError {
 		t.Fatalf("failed apply must leave rules: state %s", m.Status().State)
 	}
-	f.applyErr = nil
+	f.ApplyErr = nil
 
 	// Invalid desired spec must not remove protection.
 	bad := Spec{Interface: "wg0"}
-	if err := m.Reconcile(ctx, &bad); err == nil || f.table != old {
+	if err := m.Reconcile(ctx, &bad); err == nil || f.Table != old {
 		t.Fatal("invalid spec must keep existing rules")
 	}
 
 	// Disable failure keeps reporting error.
-	f.deleteErr = errors.New("boom")
+	f.DeleteErr = errors.New("boom")
 	if err := m.Disable(ctx); err == nil || m.Status().State != StateError {
 		t.Fatal("disable failure must surface")
 	}
-	f.deleteErr = nil
+	f.DeleteErr = nil
 	if err := m.Reconcile(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	if f.table != "" || m.Status().State != StateDisabled {
+	if f.Table != "" || m.Status().State != StateDisabled {
 		t.Fatalf("disable: %+v", m.Status())
 	}
 	if _, err := os.Stat(boot); !os.IsNotExist(err) {
@@ -255,7 +192,7 @@ func TestManagerLifecycle(t *testing.T) {
 }
 
 func TestManagerUnavailable(t *testing.T) {
-	f := &fakeNFT{unavail: errors.New("nft is not installed")}
+	f := &fakeNFT{Unavail: errors.New("nft is not installed")}
 	m := NewManager(f, "")
 	m.Now = func() time.Time { return time.Unix(0, 0) }
 	if err := m.Enable(context.Background(), spec()); err == nil {

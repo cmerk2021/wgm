@@ -64,9 +64,40 @@ type Reader interface {
 // standard library and `ip -j route`.
 type LinuxReader struct {
 	Runner sysexec.Runner
+	// RouteTTL caches route listings to avoid running `ip` on every
+	// sample; zero means 10 seconds.
+	RouteTTL time.Duration
 
 	mu     sync.Mutex
 	client *wgctrl.Client
+	routes map[string]routeCache
+}
+
+type routeCache struct {
+	at     time.Time
+	routes []string
+	err    error
+}
+
+func (l *LinuxReader) cachedRoutes(ctx context.Context, name string) ([]string, error) {
+	ttl := l.RouteTTL
+	if ttl == 0 {
+		ttl = 10 * time.Second
+	}
+	l.mu.Lock()
+	c, ok := l.routes[name]
+	l.mu.Unlock()
+	if ok && time.Since(c.at) < ttl {
+		return c.routes, c.err
+	}
+	routes, err := readRoutes(ctx, l.Runner, name)
+	l.mu.Lock()
+	if l.routes == nil {
+		l.routes = map[string]routeCache{}
+	}
+	l.routes[name] = routeCache{at: time.Now(), routes: routes, err: err}
+	l.mu.Unlock()
+	return routes, err
 }
 
 func (l *LinuxReader) wg() (*wgctrl.Client, error) {
@@ -119,6 +150,9 @@ func (l *LinuxReader) Read(ctx context.Context, name string) (Runtime, error) {
 	ifc, err := net.InterfaceByName(name)
 	if err != nil {
 		// Interface absent is a normal state, not an error.
+		l.mu.Lock()
+		delete(l.routes, name)
+		l.mu.Unlock()
 		return rt, nil
 	}
 	rt.Exists = true
@@ -161,7 +195,7 @@ func (l *LinuxReader) Read(ctx context.Context, name string) (Runtime, error) {
 		}
 	}
 	if l.Runner != nil {
-		routes, err := readRoutes(ctx, l.Runner, name)
+		routes, err := l.cachedRoutes(ctx, name)
 		if err != nil {
 			problems = append(problems, "read routes: "+err.Error())
 		}

@@ -245,6 +245,7 @@ type MetricPoint struct {
 type MetricsResult struct {
 	Name     string        `json:"name"`
 	Live     []MetricPoint `json:"live,omitempty"`
+	Latency  []MetricPoint `json:"latency,omitempty"`
 	History  []MetricPoint `json:"history,omitempty"`
 	Interval int           `json:"interval_sec"`
 }
