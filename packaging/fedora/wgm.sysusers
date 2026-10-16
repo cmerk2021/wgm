@@ -1,0 +1,3 @@
+# Members of this group may monitor tunnels and connect/disconnect
+# WGM-managed tunnels through /run/wgmd/control.sock.
+g wgm -

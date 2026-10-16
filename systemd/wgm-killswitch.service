@@ -1,0 +1,27 @@
+[Unit]
+Description=Restore the WGM kill switch before networking starts
+Documentation=https://github.com/cmerk2021/wgm
+# Runs early and independently of wgmd: if the kill switch was enabled, its
+# last enforced ruleset (/var/lib/wgm/killswitch.nft) is re-applied before any
+# interface is configured. If no ruleset was saved this is a no-op.
+DefaultDependencies=no
+After=local-fs.target nftables.service firewalld.service
+Before=network-pre.target shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+RequiresMountsFor=/var/lib/wgm
+ConditionPathExists=/var/lib/wgm/killswitch.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/wgmd killswitch-restore
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_NET_ADMIN
+
+[Install]
+WantedBy=sysinit.target
