@@ -58,13 +58,13 @@ type Authorizer struct {
 func NewAuthorizer(operatorGroup, adminGroup string, lookup GroupLookup) *Authorizer {
 	a := &Authorizer{OperatorGroup: operatorGroup, AdminGroup: adminGroup, operatorGID: -1, adminGID: -1, Groups: lookup}
 	if g, err := user.LookupGroup(operatorGroup); err == nil {
-		if n, err := strconv.ParseInt(g.Gid, 10, 64); err == nil {
-			a.operatorGID = n
+		if n, err := strconv.ParseUint(g.Gid, 10, 32); err == nil {
+			a.operatorGID = int64(n)
 		}
 	}
 	if g, err := user.LookupGroup(adminGroup); err == nil {
-		if n, err := strconv.ParseInt(g.Gid, 10, 64); err == nil {
-			a.adminGID = n
+		if n, err := strconv.ParseUint(g.Gid, 10, 32); err == nil {
+			a.adminGID = int64(n)
 		}
 	}
 	return a

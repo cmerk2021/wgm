@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -100,6 +101,10 @@ func (s *Server) Listen() error {
 	if err := os.Chmod(s.Path, 0o660); err != nil {
 		ln.Close()
 		return err
+	}
+	if s.SocketGID > math.MaxUint32 {
+		ln.Close()
+		return fmt.Errorf("socket group id %d out of range", s.SocketGID)
 	}
 	if s.SocketGID >= 0 {
 		if err := os.Chown(s.Path, 0, int(s.SocketGID)); err != nil {
