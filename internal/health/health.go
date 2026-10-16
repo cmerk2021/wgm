@@ -228,7 +228,9 @@ func (m *Machine) Observe(o Observation) (Transition, bool) {
 
 func (m *Machine) grace() time.Duration { return time.Duration(m.policy.ConnectGraceSec) * time.Second }
 
-func (m *Machine) stale() time.Duration { return time.Duration(m.policy.HandshakeStaleSec) * time.Second }
+func (m *Machine) stale() time.Duration {
+	return time.Duration(m.policy.HandshakeStaleSec) * time.Second
+}
 
 func (m *Machine) inGrace(o Observation) bool {
 	return o.Intent == IntentUp && !o.IntentAt.IsZero() && o.At.Sub(o.IntentAt) < m.grace()
