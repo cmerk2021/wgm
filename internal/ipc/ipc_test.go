@@ -130,7 +130,22 @@ func TestOperatorRequests(t *testing.T) {
 	}
 }
 
+// rawExchange sends one raw request line. The test server allows only two
+// connections and releases a slot asynchronously after the client closes,
+// so a "busy" rejection from a previous exchange is retried briefly.
 func rawExchange(t *testing.T, path, line string) api.Response {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		r := rawExchangeOnce(t, path, line)
+		if r.Error == nil || r.Error.Code != api.CodeBusy || time.Now().After(deadline) {
+			return r
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func rawExchangeOnce(t *testing.T, path, line string) api.Response {
 	t.Helper()
 	conn, err := net.Dial("unix", path)
 	if err != nil {
@@ -186,7 +201,24 @@ func TestConnectionLimit(t *testing.T) {
 		}
 	}()
 	time.Sleep(50 * time.Millisecond)
-	if r := rawExchange(t, path, `{"version":1,"id":1,"op":"ping"}`); r.Error == nil || r.Error.Code != api.CodeBusy {
+	// The server rejects an over-limit connection on accept, before any
+	// request is read, so only read the response here.
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r api.Response
+	if err := json.Unmarshal(buf[:n], &r); err != nil {
+		t.Fatal(err, string(buf[:n]))
+	}
+	if r.Error == nil || r.Error.Code != api.CodeBusy {
 		t.Fatalf("%+v", r)
 	}
 }
