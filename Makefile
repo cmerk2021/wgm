@@ -36,7 +36,10 @@ vet:
 fmt-check:
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 
-install: build
+# Run `make build` as your user first; install only copies files so that
+# `sudo make install` does not compile as root.
+install:
+	@test -x bin/wgmd -a -x bin/wgm-ui || { echo "run 'make build' first"; exit 1; }
 	install -Dm0755 bin/wgmd $(DESTDIR)$(PREFIX)/bin/wgmd
 	install -Dm0755 bin/wgm-ui $(DESTDIR)$(PREFIX)/bin/wgm-ui
 	install -Dm0644 systemd/wgmd.service $(DESTDIR)$(UNITDIR)/wgmd.service
@@ -53,8 +56,9 @@ uninstall:
 # Source + vendored dependencies for offline RPM builds.
 vendor-tarball:
 	rm -rf vendor && $(GO) mod vendor
-	tar --transform 's,^,wgm-$(VERSION)/,' -czf wgm-$(VERSION).tar.gz --exclude=./bin --exclude=*.tar.gz --exclude-vcs .
-	rm -rf vendor
+	tmp=$$(mktemp) && \
+	  tar --transform 's,^\./,wgm-$(VERSION)/,' -czf "$$tmp" --exclude=./bin --exclude='*.tar.gz' --exclude-vcs . && \
+	  mv "$$tmp" wgm-$(VERSION).tar.gz; status=$$?; rm -rf vendor; exit $$status
 
 clean:
 	rm -rf bin vendor wgm-*.tar.gz
